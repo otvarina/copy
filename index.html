@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>GENERATION LOSS</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --fg:#e8e8e8; --accent:#ff2d55; --accent2:#2dffb0;
+    --panel:#141414; --border:#2a2a2a;
+  }
+  *{box-sizing:border-box;}
+  body{
+    background:var(--bg); color:var(--fg);
+    font-family:'Courier New', monospace;
+    margin:0; padding:24px; min-height:100vh;
+  }
+  h1{ font-size:2.2rem; letter-spacing:4px; margin:0 0 4px; text-transform:uppercase; }
+  h1 span{color:var(--accent);}
+  .subtitle{color:#888; margin-bottom:24px; letter-spacing:1px; font-size:.9rem;}
+  .layout{display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start;}
+  .canvas-wrap{ background:var(--panel); border:1px solid var(--border); padding:16px; border-radius:4px; flex:1; min-width:320px; }
+  #dropzone{ border:2px dashed var(--border); border-radius:4px; padding:60px 20px; text-align:center; cursor:pointer; color:#777; transition:.2s; }
+  #dropzone:hover{border-color:var(--accent); color:var(--accent);}
+  canvas{max-width:100%; display:block; margin:0 auto; image-rendering:pixelated;}
+  .counter{ text-align:center; font-size:1.6rem; margin:16px 0 8px; letter-spacing:2px; }
+  .counter b{color:var(--accent2);}
+  .controls{ width:320px; background:var(--panel); border:1px solid var(--border); padding:20px; border-radius:4px; }
+  .ctrl{margin-bottom:18px;}
+  .ctrl label{ display:flex; justify-content:space-between; font-size:.8rem; color:#aaa; margin-bottom:6px; text-transform:uppercase; letter-spacing:1px; }
+  .ctrl label span{color:var(--accent2);}
+  input[type=range]{ width:100%; -webkit-appearance:none; height:4px; background:var(--border); border-radius:2px; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:var(--accent); cursor:pointer; margin-top:-5px; }
+  button{ font-family:inherit; text-transform:uppercase; letter-spacing:1px; border:1px solid var(--border); background:#1c1c1c; color:var(--fg); padding:12px 16px; cursor:pointer; border-radius:4px; width:100%; margin-bottom:10px; font-size:.85rem; transition:.15s; }
+  button:hover{border-color:var(--accent); color:var(--accent);}
+  #copyBtn{ background:var(--accent); color:#fff; border-color:var(--accent); font-weight:bold; font-size:1rem; padding:16px; }
+  #copyBtn:hover{background:#d9173f;}
+  .row{display:flex; gap:8px;}
+  .row button{margin-bottom:0;}
+  .filmstrip{ display:flex; gap:8px; overflow-x:auto; padding:12px 0; margin-top:12px; border-top:1px solid var(--border); }
+  .filmstrip img{ width:54px; height:54px; object-fit:cover; border:1px solid var(--border); cursor:pointer; opacity:.7; flex-shrink:0; }
+  .filmstrip img:hover, .filmstrip img.active{opacity:1; border-color:var(--accent2);}
+  .filmstrip-label{font-size:.65rem; color:#666; text-align:center; margin-top:2px;}
+  #fileInput{display:none;}
+  footer{margin-top:24px; color:#555; font-size:.75rem; line-height:1.6;}
+</style>
+</head>
+<body>
+
+<h1>GENERATION <span>LOSS</span></h1>
+<div class="subtitle"></div>
+<div class="layout">
+  <div class="canvas-wrap">
+    <div id="dropzone">
+      Загрузи фото
+      <input type="file" id="fileInput" accept="image/*">
+    </div>
+    <canvas id="canvas" style="display:none;"></canvas>
+    <div class="counter">ORIGINAL → <b id="genCount">0</b> COPIES</div>
+    <div id="filmContainer" style="display:none;">
+      <div class="filmstrip" id="filmstrip"></div>
+      <div class="filmstrip-label">история поколений — клик, чтобы вернуться</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="ctrl">
+      <label>JPEG Quality (ниже = сильнее блочность) <span id="qualityVal">0.35</span></label>
+      <input type="range" id="quality" min="0.02" max="0.9" step="0.01" value="0.35">
+    </div>
+    <div class="ctrl">
+      <label>Noise <span id="noiseVal">18</span></label>
+      <input type="range" id="noise" min="0" max="80" step="1" value="18">
+    </div>
+    <div class="ctrl">
+      <label>Contrast boost <span id="contrastVal">1.12</span></label>
+      <input type="range" id="contrast" min="1" max="1.6" step="0.01" value="1.12">
+    </div>
+    <div class="ctrl">
+      <label>Posterize levels <span id="posterizeVal">24</span></label>
+      <input type="range" id="posterize" min="2" max="64" step="1" value="24">
+    </div>
+    <div class="ctrl">
+      <label>Chromatic shift (px) <span id="chromaVal">1</span></label>
+      <input type="range" id="chroma" min="0" max="6" step="1" value="1">
+    </div>
+    <div class="ctrl">
+      <label>Halftone mix <span id="halftoneVal">0.15</span></label>
+      <input type="range" id="halftone" min="0" max="1" step="0.01" value="0.15">
+    </div>
+
+    <button id="copyBtn">COPY</button>
+    <div class="row">
+      <button id="resetBtn">↺ RESET</button>
+      <button id="downloadBtn">⬇ DOWNLOAD</button>
+    </div>
+  </div>
+</div>
+
+<footer>
+   фото никуда не отправляется.<br>
+</footer>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const genCountEl = document.getElementById('genCount');
+const filmstrip = document.getElementById('filmstrip');
+const filmContainer = document.getElementById('filmContainer');
+
+let history = [];
+let genCount = 0;
+
+['quality','noise','contrast','posterize','chroma','halftone'].forEach(id=>{
+  const el = document.getElementById(id);
+  const label = document.getElementById(id+'Val');
+  el.addEventListener('input', ()=> label.textContent = el.value);
+});
+
+dropzone.addEventListener('click', ()=> fileInput.click());
+dropzone.addEventListener('dragover', e=>{e.preventDefault(); dropzone.style.borderColor='var(--accent)';});
+dropzone.addEventListener('dragleave', ()=> dropzone.style.borderColor='');
+dropzone.addEventListener('drop', e=>{
+  e.preventDefault();
+  if(e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e=>{
+  if(e.target.files.length) loadFile(e.target.files[0]);
+});
+
+function loadFile(file){
+  const reader = new FileReader();
+  reader.onload = e=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const maxW = 900;
+      let w = img.width, h = img.height;
+      if(w > maxW){ h = h * (maxW/w); w = maxW; }
+      canvas.width = w; canvas.height = h;
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.style.display = 'block';
+      dropzone.style.display = 'none';
+      genCount = 0;
+      genCountEl.textContent = genCount;
+      history = [{dataURL: canvas.toDataURL('image/png'), gen:0}];
+      renderFilmstrip();
+      filmContainer.style.display = 'block';
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function renderFilmstrip(){
+  filmstrip.innerHTML = '';
+  history.forEach((h, idx)=>{
+    const im = document.createElement('img');
+    im.src = h.dataURL;
+    im.title = 'Generation ' + h.gen;
+    if(idx === history.length-1) im.classList.add('active');
+    im.addEventListener('click', ()=> jumpToGeneration(idx));
+    filmstrip.appendChild(im);
+  });
+  filmstrip.scrollLeft = filmstrip.scrollWidth;
+}
+
+function jumpToGeneration(idx){
+  const item = history[idx];
+  const img = new Image();
+  img.onload = ()=>{
+    canvas.width = img.width; canvas.height = img.height;
+    ctx.drawImage(img,0,0);
+    genCount = item.gen;
+    genCountEl.textContent = genCount;
+    history = history.slice(0, idx+1);
+    renderFilmstrip();
+  };
+  img.src = item.dataURL;
+}
+
+document.getElementById('copyBtn').addEventListener('click', ()=>{
+  if(!history.length){ alert('Сначала загрузи фото'); return; }
+  applyGenerationLoss();
+});
+
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  if(!history.length) return;
+  jumpToGeneration(0);
+});
+
+document.getElementById('downloadBtn').addEventListener('click', ()=>{
+  const link = document.createElement('a');
+  link.download = `generation-loss-${genCount}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+});
+
+function applyGenerationLoss(){
+  const quality = parseFloat(document.getElementById('quality').value);
+  const noiseAmt = parseFloat(document.getElementById('noise').value);
+  const contrastAmt = parseFloat(document.getElementById('contrast').value);
+  const levels = parseInt(document.getElementById('posterize').value);
+  const chromaShift = parseInt(document.getElementById('chroma').value);
+  const halftoneMix = parseFloat(document.getElementById('halftone').value);
+
+  const jpegData = canvas.toDataURL('image/jpeg', Math.max(0.02, quality));
+  const img = new Image();
+  img.onload = ()=>{
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    const w = canvas.width, h = canvas.height;
+    const frame = ctx.getImageData(0,0,w,h);
+    const src = new Uint8ClampedArray(frame.data);
+    const data = frame.data;
+
+    for(let y=0; y<h; y++){
+      for(let x=0; x<w; x++){
+        const i = (y*w+x)*4;
+        let rX = Math.min(w-1, Math.max(0, x - chromaShift));
+        let bX = Math.min(w-1, Math.max(0, x + chromaShift));
+        const rI = (y*w+rX)*4;
+        const bI = (y*w+bX)*4;
+        let r = src[rI];
+        let g = src[i+1];
+        let b = src[bI+2];
+
+        r = (r-128)*contrastAmt + 128;
+        g = (g-128)*contrastAmt + 128;
+        b = (b-128)*contrastAmt + 128;
+
+        const n = (Math.random()-0.5) * noiseAmt;
+        r += n; g += n; b += n;
+
+        const step = 255/(levels-1);
+        r = Math.round(r/step)*step;
+        g = Math.round(g/step)*step;
+        b = Math.round(b/step)*step;
+
+        if(halftoneMix > 0){
+          const lum = 0.299*r+0.587*g+0.114*b;
+          const dot = ((x+y) % 4 < 2) ? 255 : 0;
+          const halftoneVal = lum > 128 ? 255 : dot;
+          r = r*(1-halftoneMix) + halftoneVal*halftoneMix;
+          g = g*(1-halftoneMix) + halftoneVal*halftoneMix;
+          b = b*(1-halftoneMix) + halftoneVal*halftoneMix;
+        }
+
+        data[i] = clamp(r); data[i+1] = clamp(g); data[i+2] = clamp(b);
+      }
+    }
+    ctx.putImageData(frame, 0, 0);
+
+    genCount++;
+    genCountEl.textContent = genCount;
+    history.push({dataURL: canvas.toDataURL('image/png'), gen: genCount});
+    if(history.length > 40) history.shift();
+    renderFilmstrip();
+  };
+  img.src = jpegData;
+}
+
+function clamp(v){ return Math.min(255, Math.max(0, v)); }
+</script>
+</body>
+</html>
